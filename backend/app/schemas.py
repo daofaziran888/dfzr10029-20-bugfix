@@ -35,6 +35,28 @@ class ActionPayload(BaseModel):
     remark: str | None = None
 
 
+class ReceiptPayload(BaseModel):
+    """调度执行回执：执行结果与提交/完成时间一起提交。
+
+    字段名同时接受英文字段和中文业务字段，方便调度器与页面共用同一契约。
+    """
+
+    receipt_id: str | None = None  # 回执编号
+    status: str | None = None  # 执行状态
+    result: str | None = None  # 执行结果
+    submitted_at: str | None = None  # 提交时间
+    completed_at: str | None = None  # 完成时间
+    watermark_basis: str | None = None  # 水位依据：completed_at / submitted_at
+    values: dict[str, Any] = Field(default_factory=dict)
+
+
+class RecoveryPayload(ReceiptPayload):
+    """断线恢复请求：恢复时重新提交的旧回执同样走执行回执契约。"""
+
+    connection_id: str | None = None
+    resumed_at: str | None = None
+
+
 
 class MetricDefEntry(BaseModel):
     """指标明细结构。"""

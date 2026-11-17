@@ -13,18 +13,27 @@
       <button class="btn" type="button" @click="reload">查询</button>
     </div>
     <div class="timeline-wrap">
-      <div v-for="item in timelineItems" :key="item.id" class="timeline-row">
+      <div v-for="item in timelineItems" :key="item.id" class="timeline-row" :data-testid="`row-${item.id}`" :data-status="item.status">
         <span class="timeline-label">{{ item.name || item.label }}</span>
         <div class="timeline-track">
           <div class="timeline-bar" :class="`status-${item.status}`" :style="{ left: barLeft(item) + '%', width: barWidth(item) + '%' }" :data-testid="`bar-${item.id}`" :title="`${item.start} ~ ${item.end}`" @click="selectItem(item)">&nbsp;</div>
         </div>
         <span style="font-size:12px;color:var(--muted);margin-left:8px;">{{ item.start }} ~ {{ item.end }}</span>
+        <span class="last-exec" :data-testid="`last-execution-${item.id}`" style="font-size:12px;color:var(--muted);margin-left:8px;">上次执行：{{ item.lastExecution || '—' }}</span>
       </div>
       <p v-if="!timelineItems.length" style="text-align:center;color:var(--muted)">暂无作业记录</p>
     </div>
     <div v-if="selectedItem" class="timeline-log" data-testid="timeline-log">
       <strong>{{ selectedItem.name || selectedItem.label }}</strong> — 状态：{{ selectedItem.status }}
+      <div style="margin-top:4px;">上次执行：{{ selectedItem.lastExecution || '—' }}（水位依据：{{ selectedItem.水位依据 || '—' }}）</div>
       <div style="margin-top:4px;">{{ selectedItem.logs || '暂无日志' }}</div>
+      <div v-if="selectedItem.ignoredReceiptCount" style="margin-top:4px;" data-testid="ignored-receipts">
+        已忽略旧回执 {{ selectedItem.ignoredReceiptCount }} 条：
+        <span v-for="r in selectedItem.ignoredReceipts" :key="r.receiptId">{{ r.receiptId }}（{{ r.完成时间 }}）</span>
+      </div>
+      <div v-if="selectedDetail && selectedDetail.watermark" style="margin-top:4px;" data-testid="watermark-detail">
+        当前水位：{{ selectedDetail.watermark.lastExecution }} · 回执 {{ selectedDetail.watermark.receiptId || '—' }} · {{ selectedDetail.watermark.水位依据 }}
+      </div>
     </div>
     <div v-if="showCreate" class="modal-backdrop" data-testid="create-modal">
       <form class="modal" @submit.prevent="submitCreate"><h3>登记调度任务</h3>
@@ -45,13 +54,22 @@ const columns = ["任务编号", "任务名称", "调度类型", "执行周期",
 const actions = ["立即执行", "暂停任务", "标记失败"]
 const timelineItems = ref<any[]>([])
 const selectedItem = ref<any>(null)
+const selectedDetail = ref<any>(null)
 const dateFrom = ref(''); const dateTo = ref('')
 const errorMessage = ref(''); const showCreate = ref(false)
 const createValues = ref<Record<string,string>>({})
 const allItems = ref<any[]>([])
 function barLeft(item: any) { const all = allItems.value.filter(i => i.start && i.end); if(!all.length) return 0; const min = Math.min(...all.map(i => new Date(i.start).getTime())); const max = Math.max(...all.map(i => new Date(i.end).getTime())); const range = max - min || 86400000; return ((new Date(item.start).getTime() - min) / range) * 100 }
 function barWidth(item: any) { const all = allItems.value.filter(i => i.start && i.end); if(!all.length) return 20; const min = Math.min(...all.map(i => new Date(i.start).getTime())); const max = Math.max(...all.map(i => new Date(i.end).getTime())); const range = max - min || 86400000; return Math.max(5, ((new Date(item.end).getTime() - new Date(item.start).getTime()) / range) * 100) }
-function selectItem(item: any) { selectedItem.value = selectedItem.value?.id === item.id ? null : item }
+async function selectItem(item: any) {
+  if (selectedItem.value?.id === item.id) { selectedItem.value = null; selectedDetail.value = null; return }
+  selectedItem.value = item
+  selectedDetail.value = null
+  try {
+    const res = await request(`${ENDPOINT}/${item.id}`)
+    if (res.ok) selectedDetail.value = await res.json()
+  } catch(e) { errorMessage.value = '详情加载失败' }
+}
 async function reload() {
   try { const res = await request(ENDPOINT); const data = await res.json(); allItems.value = data.items || []; applyFilter() } catch(e) { errorMessage.value = '加载失败' }
 }
@@ -59,7 +77,7 @@ function applyFilter() {
   let items = allItems.value
   if(dateFrom.value) items = items.filter((i: any) => i.start >= dateFrom.value)
   if(dateTo.value) items = items.filter((i: any) => i.end <= dateTo.value)
-  timelineItems.value = items; selectedItem.value = null
+  timelineItems.value = items; selectedItem.value = null; selectedDetail.value = null
 }
 function openCreate() { createValues.value = {}; showCreate.value = true }
 async function submitCreate() {
